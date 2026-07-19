@@ -88,10 +88,15 @@ def test_switch_writes_full_state():
     assert auth["account"]["email"] == "switch1@uuf.me"
     # 4. user setting preserved
     assert storage["some.user.setting"] == "preserve-me"
-    # 5. runtime caches deleted
-    assert not (td / "Network" / "Cookies").exists()
-    assert not (td / "IndexedDB").exists()
-    assert not (td / "Local State").exists()
+    # 5. runtime caches deleted — but account-bound state (cookies,
+    #    localStorage, state.vscdb) preserved by profile.py.
+    #    Pre-existing runtime caches that we DO clear (Cache/, logs/, etc.)
+    #    aren't seeded here, so result["cleared"] may be empty.
+    assert "Network/Cookies" not in result["cleared"]
+    assert "User/globalStorage/state.vscdb" not in result["cleared"]
+    # Account-bound paths must still exist (profile.py preserves them)
+    assert (td / "Network" / "Cookies").exists()
+    assert (td / "IndexedDB").exists()
     # 6. account marked current in db
     assert db.get_current_account_id() == acc.id
     persisted = db.get_account(acc.id)
@@ -101,7 +106,6 @@ def test_switch_writes_full_state():
     assert ctl.events == ["kill"]
     assert result["launched"] is False
     assert result["machine_id"] == acc.machine_id
-    assert "Network/Cookies" in result["cleared"]
 
 
 def test_switch_launch_invokes_controller():

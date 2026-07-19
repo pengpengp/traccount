@@ -263,10 +263,145 @@ def show_path() -> None:
 @app.command()
 def info() -> None:
     """Show environment / configuration info."""
-    console.print(f"tam version    : {__version__}")
-    console.print(f"Trae data dir : {get_trae_data_dir()}")
-    console.print(f"Trae exe      : {get_trae_exe_path() or '(not configured)'}")
-    console.print(f"db path       : {db.get_db_path() if hasattr(db, 'get_db_path') else '(internal)'}")
+    from .config import get_license_dat_path, get_trae_config_dir
+    from .profile import get_profile_root
+    console.print(f"tam version      : {__version__}")
+    console.print(f"Trae data dir   : {get_trae_data_dir()}")
+    console.print(f"Trae config dir : {get_trae_config_dir()}")
+    console.print(f"license.dat     : {get_license_dat_path()}")
+    console.print(f"Trae exe        : {get_trae_exe_path() or '(not configured)'}")
+    console.print(f"profile root    : {get_profile_root()}")
+    console.print(f"db path         : {db.get_db_path() if hasattr(db, 'get_db_path') else '(internal)'}")
+
+
+# ---------------------------------------------------------------------------
+# Profile management (per-account state isolation)
+# ---------------------------------------------------------------------------
+profile_app = typer.Typer(help="Manage per-account Trae profiles (chat history / cookies / license.dat).")
+app.add_typer(profile_app, name="profile")
+
+
+@profile_app.command("list")
+def profile_list() -> None:
+    """List all stored account profiles."""
+    from .profile import list_profiles
+    profiles = list_profiles()
+    if not profiles:
+        console.print("[dim]no profiles yet — switch accounts to create them[/dim]")
+        return
+    t = Table("account_id", "email", "last_backup", "last_restore", "size")
+    for p in profiles:
+        t.add_row(
+            p["account_id"][:12],
+            p["email"],
+            _ts(p["last_backup_at"]),
+            _ts(p["last_restore_at"]),
+            _human_size(p["size_bytes"]),
+        )
+    console.print(t)
+
+
+@profile_app.command("show")
+def profile_show(
+    account_id: str = typer.Argument(..., help="account id (or unique prefix)"),
+) -> None:
+    """Show details of one account's profile."""
+    from .profile import has_profile, read_meta, resolve_profile_paths
+    a = _find_account(account_id)
+    if a is None:
+        console.print(f"[red]no account matching '{account_id}'[/red]")
+        raise typer.Exit(1)
+    if not has_profile(a.id):
+        console.print(f"[yellow]no profile yet for {a.email}[/yellow]")
+        return
+    paths = resolve_profile_paths(a.id)
+    meta = read_meta(a.id)
+    console.print(f"[bold]account[/bold] {a.email}  (id={a.id[:8]})")
+    console.print(f"profile dir   : {paths.root}")
+    console.print(f"email        : {meta.email}")
+    console.print(f"last backup  : {_ts(meta.last_backup_at)}")
+    console.print(f"last restore : {_ts(meta.last_restore_at)}")
+    console.print(f"size         : {_human_size(_dir_size_safe(paths.root))}")
+    console.print("[dim]files:[/dim]")
+    for rel, p in paths.state_files.items():
+        mark = "[green]✓[/green]" if p.exists() else "[dim]·[/dim]"
+        console.print(f"  {mark} {rel}")
+    if paths.license_dat.exists():
+        console.print("  [green]✓[/green] license.dat")
+    console.print("[dim]dirs:[/dim]")
+    for rel, p in paths.state_dirs.items():
+        mark = "[green]✓[/green]" if p.exists() and any(p.iterdir()) else "[dim]·[/dim]"
+        console.print(f"  {mark} {rel}")
+
+
+@profile_app.command("backup")
+def profile_backup(
+    account_id: str = typer.Argument(..., help="account id (or unique prefix)"),
+) -> None:
+    """Backup the CURRENT Trae state into the given account's profile."""
+    from .profile import backup_profile
+    a = _find_account(account_id)
+    if a is None:
+        console.print(f"[red]no account matching '{account_id}'[/red]")
+        raise typer.Exit(1)
+    sw = Switcher()
+    sw.ctl.kill()  # ensure Trae is not running
+    res = backup_profile(Path(get_trae_data_dir()), a.id, email=a.email)
+    console.print(
+        f"[green]backed up[/green] {len(res['copied_files'])} files + "
+        f"{len(res['copied_dirs'])} dirs → profile/{a.id[:8]}"
+    )
+
+
+@profile_app.command("delete")
+def profile_delete(
+    account_id: str = typer.Argument(..., help="account id (or unique prefix)"),
+) -> None:
+    """Delete an account's profile (chat history etc.). Account itself is kept."""
+    from .profile import delete_profile, has_profile
+    a = _find_account(account_id)
+    if a is None:
+        console.print(f"[red]no account matching '{account_id}'[/red]")
+        raise typer.Exit(1)
+    if not has_profile(a.id):
+        console.print(f"[yellow]no profile for {a.email}[/yellow]")
+        return
+    if delete_profile(a.id):
+        console.print(f"[green]deleted[/green] profile for {a.email}")
+    else:
+        console.print(f"[red]delete failed[/red]")
+
+
+# ---------------------------------------------------------------------------
+def _ts(unix_ts: int) -> str:
+    if not unix_ts:
+        return "-"
+    import datetime as _dt
+    return _dt.datetime.fromtimestamp(unix_ts).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _human_size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+
+def _dir_size_safe(p) -> int:
+    from pathlib import Path
+    if not isinstance(p, Path):
+        p = Path(p)
+    if not p.exists():
+        return 0
+    total = 0
+    for f in p.rglob("*"):
+        if f.is_file():
+            try:
+                total += f.stat().st_size
+            except OSError:
+                pass
+    return total
 
 
 @app.command()

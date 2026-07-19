@@ -2,18 +2,20 @@
 
 Orchestrates the Trae IDE state swap, porting
 ``Yang-505/Trae-Account-Manager`` switch_trae_account into Python:
-  kill Trae -> write machineid -> clear runtime cache -> patch storage.json
+  kill Trae -> backup current profile -> restore target profile ->
+  write machineid -> clear runtime caches -> patch storage.json
   telemetry -> write iCubeAuthInfo -> (Windows) reset MachineGuid -> launch Trae.
 """
 from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import asdict
 from pathlib import Path
 
-from . import db, machine
-from .config import get_trae_data_dir
+from . import db, machine, profile
+from .config import get_license_dat_path, get_trae_data_dir
 from .machine import TraeLoginInfo, login_info_from_dict
 from .process_ctl import DefaultProcessController, ProcessController
 from .vault import decrypt_obj, encrypt_obj
@@ -48,7 +50,13 @@ class Switcher:
     # ------------------------------------------------------------------
     def switch_to_account(self, account, *, launch: bool = True,
                           reset_registry: bool = False) -> dict:
-        """Apply ``account`` to the local Trae IDE."""
+        """Apply ``account`` to the local Trae IDE.
+
+        Profile flow: backup current Trae state to the *currently-active*
+        account's profile (so we don't lose its chat history), then restore
+        the target account's profile (if one exists) before patching
+        identity (machineid / iCubeAuthInfo / license.dat).
+        """
         trae_dir = Path(get_trae_data_dir())
         info = self._account_login_info(account)
         machine_id = account.machine_id or machine.generate_machine_id()
@@ -64,19 +72,62 @@ class Switcher:
         # 1. stop Trae
         self.ctl.kill()
 
-        # 2. write machineid
+        # 2. Backup the *current* account's state to its profile (if we know
+        # which account is currently active). This preserves chat history,
+        # workspace state, and cookies for the account we're leaving.
+        backup_result = {"copied_files": [], "copied_dirs": []}
+        current_id = db.get_current_account_id()
+        if current_id and current_id != account.id:
+            cur_acc = db.get_account(current_id)
+            cur_email = cur_acc.email if cur_acc else ""
+            try:
+                backup_result = profile.backup_profile(
+                    trae_dir, current_id, email=cur_email,
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("profile backup for %s failed: %s", current_id, e)
+
+        # 3. Restore the target account's profile (if one exists). On first
+        # switch (no profile yet), we leave Trae's existing state alone and
+        # just patch identity below.
+        restore_result = {"restored_files": [], "restored_dirs": []}
+        if profile.has_profile(account.id):
+            try:
+                restore_result = profile.restore_profile(account.id, trae_dir)
+            except Exception as e:  # noqa: BLE001
+                log.warning("profile restore for %s failed: %s", account.id, e)
+
+        # 4. write machineid
         machine.write_machineid(trae_dir, machine_id)
 
-        # 3. clear runtime caches
+        # 5. clear runtime caches (no longer touches state.vscdb / cookies)
         removed = machine.clear_runtime_cache(trae_dir)
 
-        # 4. patch telemetry + clear old auth
+        # 6. patch telemetry + clear old auth keys
         machine.patch_storage_telemetry(machine_id, trae_dir, clear_auth=True)
 
-        # 5. write new login info
+        # 7. write new login info (iCubeAuthInfo / iCubeEntitlementInfo)
         machine.write_login_info(trae_dir, info)
 
-        # 6. (Windows) optionally reset registry MachineGuid
+        # 8. handle license.dat — if the target account's profile has one,
+        # it's already been restored by step 3. If not (first switch), we
+        # delete the existing one so Trae doesn't auto-login as the old
+        # account on next launch.
+        lic_path = get_license_dat_path()
+        if not lic_path.exists() and not profile.has_profile(account.id):
+            # Nothing to do — no license.dat in either place.
+            pass
+        elif not profile.has_profile(account.id):
+            # First switch for this account: drop the existing license.dat
+            # so Trae doesn't restore the previous account's session.
+            try:
+                if lic_path.exists():
+                    lic_path.unlink()
+                    log.info("removed license.dat (no profile for new account)")
+            except OSError as e:
+                log.warning("could not remove license.dat: %s", e)
+
+        # 9. (Windows) optionally reset registry MachineGuid
         reg_reset = False
         if reset_registry and __import__("sys").platform.startswith("win"):
             try:
@@ -85,13 +136,13 @@ class Switcher:
             except Exception as e:  # noqa: BLE001
                 log.warning("registry reset failed (need admin?): %s", e)
 
-        # 7. persist machine_id on the account record + mark current
+        # 10. persist machine_id on the account record + mark current
         account.machine_id = machine_id
-        account.last_used_at = int(__import__("time").time())
+        account.last_used_at = int(time.time())
         db.upsert_account(account)
         db.set_current_account(account.id)
 
-        # 8. launch Trae
+        # 11. launch Trae
         launched = False
         if launch:
             try:
@@ -107,6 +158,12 @@ class Switcher:
             "cleared": removed,
             "registry_reset": reg_reset,
             "launched": launched,
+            "profile_backed_up": current_id or "",
+            "profile_restored": profile.has_profile(account.id),
+            "backup_count": len(backup_result.get("copied_files", []))
+                             + len(backup_result.get("copied_dirs", [])),
+            "restore_count": len(restore_result.get("restored_files", []))
+                              + len(restore_result.get("restored_dirs", [])),
         }
 
     # ------------------------------------------------------------------
@@ -122,6 +179,13 @@ class Switcher:
         machine.write_machineid(trae_dir, mid)
         machine.clear_runtime_cache(trae_dir)
         machine.patch_storage_telemetry(mid, trae_dir, clear_auth=True)
+        # Drop license.dat so Trae doesn't auto-restore the previous account.
+        lic_path = get_license_dat_path()
+        try:
+            if lic_path.exists():
+                lic_path.unlink()
+        except OSError as e:
+            log.warning("could not remove license.dat: %s", e)
         db.set_current_account(None)
         return {"machine_id": mid}
 

@@ -134,9 +134,15 @@ def test_e2e_full_pipeline():
     assert storage["ui.theme"] == "dark"
     # telemetry patched to match machineid
     assert storage["telemetry.machineId"] == machine.telemetry_machine_id(machine_id_in_dir)
-    # runtime caches cleared
-    assert not (td / "Network" / "Cookies").exists()
-    assert not (td / "Local State").exists()
+    # runtime caches cleared: account-bound state (cookies, localStorage,
+    # state.vscdb) is now preserved by profile.py, NOT cleared. So these
+    # paths should still exist after a switch.
+    assert (td / "Network" / "Cookies").exists()
+    # "Local State" is also account-bound (Chromium global state) and is
+    # preserved now; the old "stale" content from _seed_trae_dir may have
+    # been overwritten by a profile restore, but if no profile exists
+    # for the account on first switch, the file is left in place.
+    assert (td / "Local State").exists()
 
     # 5. db has the account marked current
     assert db.get_current_account_id() == acc.id

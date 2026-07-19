@@ -69,22 +69,35 @@ def test_write_login_info(tmp_path):
 
 def test_clear_runtime_cache(tmp_path):
     td = tmp_path
-    # create files
+    # Create runtime caches that SHOULD be deleted on switch.
+    for rel in ("Cache", "CachedData", "Code Cache", "GPUCache", "logs"):
+        (td / rel).mkdir(parents=True)
+        (td / rel / "junk.bin").write_text("x")
+    # Create account-bound state that should NOT be touched by
+    # clear_runtime_cache — those are now handled by profile.py.
     (td / "User/globalStorage").mkdir(parents=True)
-    (td / "User/globalStorage/state.vscdb").write_text("x")
-    (td / "User/globalStorage/state.vscdb.backup").write_text("x")
-    (td / "Local State").write_text("x")
-    (td / "IndexedDB").mkdir()
-    (td / "Local Storage").mkdir()
-    (td / "Session Storage").mkdir()
+    (td / "User/globalStorage/state.vscdb").write_text("keep me")
     (td / "Network").mkdir()
-    (td / "Network/Cookies").write_text("x")
-    (td / "Network/Cookies-journal").write_text("x")
+    (td / "Network/Cookies").write_text("keep me too")
+    (td / "Local Storage").mkdir()
+    (td / "IndexedDB").mkdir()
+
     removed = machine.clear_runtime_cache(td)
-    assert "User/globalStorage/state.vscdb" in removed
-    assert "Network/Cookies" in removed
-    assert not (td / "Network/Cookies").exists()
-    assert not (td / "IndexedDB").exists()
+
+    # Pure caches should be removed
+    assert "Cache" in removed
+    assert "CachedData" in removed
+    assert "Code Cache" in removed
+    assert "GPUCache" in removed
+    assert "logs" in removed
+
+    # Account-bound state must be preserved (profile.py handles these)
+    assert "User/globalStorage/state.vscdb" not in removed
+    assert "Network/Cookies" not in removed
+    assert (td / "User/globalStorage/state.vscdb").exists()
+    assert (td / "Network/Cookies").exists()
+    assert (td / "Local Storage").exists()
+    assert (td / "IndexedDB").exists()
 
 
 def test_backup_trae_dir(tmp_path):

@@ -37,15 +37,24 @@ AUTH_KEYS = (
 )
 
 # Runtime caches that must be cleared on switch (path relative to Trae data dir).
+# NOTE: This list intentionally does NOT include ``User/globalStorage/state.vscdb``
+# or the Chromium cookie/localStorage/sessionStorage/IndexedDB trees — those
+# contain account-bound state (chat history, workspace state, X-Cloudide-Session
+# cookies) that must be preserved via profile backup/restore (see profile.py),
+# not wiped on every switch. Wiping them was the previous behavior and caused
+# every switch to reset the IDE (losing all chat history).
 RUNTIME_CACHE_PATHS = (
-    "User/globalStorage/state.vscdb",
-    "User/globalStorage/state.vscdb.backup",
-    "Local State",
-    "IndexedDB",
-    "Local Storage",
-    "Session Storage",
-    "Network/Cookies",
-    "Network/Cookies-journal",
+    # Pure runtime caches (safe to delete; Trae will regenerate on next launch)
+    "Cache",
+    "CachedData",
+    "CachedExtensions",
+    "CachedExtensionVSIXs",
+    "Code Cache",
+    "GPUCache",
+    "logs",
+    # VS Code service worker / compilation cache
+    "User/Service Worker",
+    "User/workspaceStorage/.tmp",  # only the tmp subdir, real wsStorage is preserved
 )
 
 

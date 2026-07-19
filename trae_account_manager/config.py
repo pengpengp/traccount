@@ -74,6 +74,30 @@ def get_trae_data_dir() -> Path:
     )
 
 
+def get_trae_config_dir() -> Path:
+    """Trae IDE config directory (where ``license.dat`` lives).
+
+    Separate from :func:`get_trae_data_dir`: Trae stores its license in
+    ``~/.config/TraeAI/`` on all platforms (the Electron ``app.getPath``
+    for ``appData`` is the OS home, not the user-data dir).
+
+    Override with ``TRAE_CONFIG_DIR`` for non-standard installs.
+    """
+    override = os.environ.get("TRAE_CONFIG_DIR")
+    if override:
+        return Path(override)
+    home = os.environ.get("HOME") or str(Path.home())
+    # On Windows, HOME may be unset; fall back to USERPROFILE.
+    if is_windows() and not os.environ.get("HOME"):
+        home = os.environ.get("USERPROFILE", str(Path.home()))
+    return Path(home) / ".config" / "TraeAI"
+
+
+def get_license_dat_path() -> Path:
+    """Path to Trae's encrypted ``license.dat`` file."""
+    return get_trae_config_dir() / "license.dat"
+
+
 def get_db_path() -> Path:
     return get_app_data_dir() / "accounts.db"
 
