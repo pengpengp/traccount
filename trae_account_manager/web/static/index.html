@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Trae Account Manager</title>
+  <style>
+    :root {
+      --bg: #0e0f13;
+      --panel: #16181f;
+      --panel-2: #1c1f28;
+      --border: #2a2e3a;
+      --text: #e6e7eb;
+      --muted: #8b8f9c;
+      --accent: #5b9dff;
+      --ok: #34d399;
+      --warn: #f59e0b;
+      --err: #f87171;
+      --code-bg: #0a0b0e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI",
+        Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    header {
+      padding: 16px 24px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 16px;
+      background: linear-gradient(180deg, #1a1c25, var(--panel));
+    }
+    header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+    header .ver { color: var(--muted); font-size: 12px; }
+    header .spacer { flex: 1; }
+    header button {
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+      padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    }
+    header button:hover { border-color: var(--accent); }
+    header button.primary {
+      background: var(--accent); color: #0a0b0e; border-color: var(--accent);
+    }
+    main {
+      max-width: 1100px; margin: 0 auto; padding: 24px;
+      display: grid; gap: 24px;
+    }
+    section {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; padding: 16px 20px;
+    }
+    section h2 {
+      margin: 0 0 12px; font-size: 14px; text-transform: uppercase;
+      letter-spacing: .04em; color: var(--muted); font-weight: 600;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+    td.actions { white-space: nowrap; }
+    td.actions button {
+      background: transparent; color: var(--accent); border: 1px solid transparent;
+      padding: 4px 8px; cursor: pointer; border-radius: 4px; font-size: 12px;
+    }
+    td.actions button:hover { background: var(--panel-2); border-color: var(--border); }
+    td.actions button.danger { color: var(--err); }
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 10px;
+      font-size: 11px; background: var(--panel-2); color: var(--muted);
+    }
+    .badge.cur { background: rgba(91, 157, 255, .2); color: var(--accent); }
+    .badge.ok { background: rgba(52, 211, 153, .15); color: var(--ok); }
+    .badge.err { background: rgba(248, 113, 113, .15); color: var(--err); }
+    .log {
+      background: var(--code-bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 12px; height: 280px; overflow-y: auto;
+      font-family: "SF Mono", Monaco, Consolas, monospace; font-size: 12px;
+    }
+    .log .line { white-space: pre-wrap; word-break: break-all; margin-bottom: 2px; }
+    .log .ts { color: var(--muted); }
+    .log .ok { color: var(--ok); }
+    .log .err { color: var(--err); }
+    .log .warn { color: var(--warn); }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .stat {
+      background: var(--panel-2); border: 1px solid var(--border);
+      padding: 10px 14px; border-radius: 6px;
+    }
+    .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    .stat .value { font-size: 22px; font-weight: 600; margin-top: 4px; }
+    .stat .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+    form.inline { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+    form.inline label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); }
+    form.inline input {
+      background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+      padding: 6px 10px; border-radius: 4px; font-size: 13px; width: 160px;
+    }
+    .empty { color: var(--muted); font-style: italic; padding: 24px 0; text-align: center; }
+    .toast {
+      position: fixed; bottom: 20px; right: 20px; background: var(--panel);
+      border: 1px solid var(--border); padding: 10px 16px; border-radius: 6px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.5); opacity: 0; transition: opacity .25s;
+    }
+    .toast.show { opacity: 1; }
+    .toast.ok { border-color: var(--ok); }
+    .toast.err { border-color: var(--err); }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Trae Account Manager</h1>
+  <span class="ver" id="ver">v?</span>
+  <div class="spacer"></div>
+  <button onclick="reload()">刷新</button>
+  <button class="primary" onclick="switchTo()">切换到所选</button>
+</header>
+
+<main>
+  <section>
+    <h2>账号列表</h2>
+    <table id="accounts-table">
+      <thead>
+        <tr>
+          <th>当前</th><th>邮箱</th><th>用户名</th><th>区域</th><th>套餐</th>
+          <th>状态</th><th>机器码</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="accounts-body">
+        <tr><td colspan="8" class="empty">加载中…</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>用量统计（当前账号）</h2>
+    <div class="stats" id="usage-stats">
+      <div class="stat"><div class="label">套餐</div><div class="value" id="u-plan">—</div><div class="sub" id="u-reset"></div></div>
+      <div class="stat"><div class="label">Fast 请求</div><div class="value" id="u-fast">—</div><div class="sub" id="u-fast-sub"></div></div>
+      <div class="stat"><div class="label">Slow 请求</div><div class="value" id="u-slow">—</div><div class="sub" id="u-slow-sub"></div></div>
+      <div class="stat"><div class="label">自动补全</div><div class="value" id="u-auto">—</div><div class="sub" id="u-auto-sub"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>注册新账号</h2>
+    <form class="inline" onsubmit="event.preventDefault(); startRegister();">
+      <label>数量<input type="number" id="reg-count" value="1" min="1" max="50"></label>
+      <label>并发<input type="number" id="reg-conc" value="2" min="1" max="10"></label>
+      <label>显示浏览器<input type="checkbox" id="reg-headed"></label>
+      <button type="submit" class="primary">开始注册</button>
+      <span id="reg-status" class="badge"></span>
+    </form>
+  </section>
+
+  <section>
+    <h2>实时日志</h2>
+    <div class="log" id="log"></div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '';
+let selectedId = null;
+let ws = null;
+
+function log(msg, level) {
+  const el = document.getElementById('log');
+  const ts = new Date().toLocaleTimeString();
+  const line = document.createElement('div');
+  line.className = 'line';
+  line.innerHTML = `<span class="ts">${ts}</span> <span class="${level || ''}">${escapeHtml(msg)}</span>`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+}
+
+function toast(msg, level) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (level || '');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+async function api(path, opts) {
+  const r = await fetch(API + path, opts);
+  if (!r.ok) {
+    const txt = await r.text();
+    throw new Error(`${r.status} ${txt}`);
+  }
+  return r.json();
+}
+
+async function reload() {
+  try {
+    const info = await api('/api/info');
+    document.getElementById('ver').textContent = 'v' + info.version;
+  } catch (e) { log('info error: ' + e.message, 'err'); }
+
+  try {
+    const data = await api('/api/accounts');
+    const body = document.getElementById('accounts-body');
+    if (!data.accounts.length) {
+      body.innerHTML = '<tr><td colspan="8" class="empty">没有账号。请在下方注册或导入。</td></tr>';
+    } else {
+      body.innerHTML = data.accounts.map(a => `
+        <tr>
+          <td>${a.is_current ? '<span class="badge cur">●</span>' : ''}</td>
+          <td>${escapeHtml(a.email)}</td>
+          <td>${escapeHtml(a.name)}</td>
+          <td>${a.region}</td>
+          <td>${a.plan_type}</td>
+          <td><span class="badge ${a.status==='active'?'ok':'err'}">${a.status}</span></td>
+          <td><code>${a.machine_id ? a.machine_id.slice(0,8) : '—'}</code></td>
+          <td class="actions">
+            <button onclick="select('${a.id}')">选</button>
+            <button onclick="switchTo('${a.id}')">切换</button>
+            <button onclick="showUsage('${a.id}')">用量</button>
+            <button class="danger" onclick="del('${a.id}')">删</button>
+          </td>
+        </tr>`).join('');
+    }
+  } catch (e) { log('list error: ' + e.message, 'err'); }
+
+  // try usage for current account
+  const cur = (await api('/api/accounts').catch(() => ({current_id: null}))).current_id;
+  if (cur) showUsage(cur);
+}
+
+function select(id) {
+  selectedId = id;
+  toast('已选择账号 ' + id.slice(0,8), 'ok');
+}
+
+async function switchTo(id) {
+  const aid = id || selectedId;
+  if (!aid) { toast('先选择一个账号', 'err'); return; }
+  toast('正在切换…');
+  try {
+    const r = await api(`/api/switch/${aid}`, { method: 'POST' });
+    toast(`已切换到 ${r.email}`, 'ok');
+    log(`switched -> ${r.email} (machine_id=${r.machine_id})`, 'ok');
+    reload();
+  } catch (e) { toast('切换失败: ' + e.message, 'err'); log(e.message, 'err'); }
+}
+
+async function showUsage(id) {
+  try {
+    const u = await api(`/api/usage/${id}`);
+    document.getElementById('u-plan').textContent = u.plan_type || '—';
+    document.getElementById('u-reset').textContent = u.reset_time ?
+      '重置于 ' + new Date(u.reset_time * 1000).toLocaleDateString() : '';
+    setStat('fast', u.fast_request_limit, u.fast_request_used, u.fast_request_left);
+    setStat('slow', u.slow_request_limit, u.slow_request_used, u.slow_request_left);
+    setStat('auto', u.autocomplete_limit, u.autocomplete_used, u.autocomplete_left);
+    if (u.extra_fast_request_limit) {
+      log(`extra package: ${u.extra_package_name} = ${u.extra_fast_request_left}/${u.extra_fast_request_limit}`, 'ok');
+    }
+  } catch (e) { log('usage error: ' + e.message, 'warn'); }
+}
+
+function setStat(prefix, limit, used, left) {
+  document.getElementById(`u-${prefix}`).textContent = `${left.toFixed(0)} / ${limit}`;
+  document.getElementById(`u-${prefix}-sub`).textContent = `已用 ${used.toFixed(1)}`;
+}
+
+async function del(id) {
+  if (!confirm('确认删除账号？')) return;
+  try {
+    await api(`/api/accounts/${id}`, { method: 'DELETE' });
+    toast('已删除', 'ok');
+    reload();
+  } catch (e) { toast('删除失败: ' + e.message, 'err'); }
+}
+
+async function startRegister() {
+  const count = parseInt(document.getElementById('reg-count').value);
+  const conc = parseInt(document.getElementById('reg-conc').value);
+  const headed = document.getElementById('reg-headed').checked;
+  document.getElementById('reg-status').textContent = '运行中…';
+  try {
+    await api('/api/register', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ count, concurrency: conc, headless: !headed, persist: true }),
+    });
+    toast('注册任务已启动', 'ok');
+  } catch (e) {
+    document.getElementById('reg-status').textContent = '';
+    toast('启动失败: ' + e.message, 'err');
+  }
+}
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onopen = () => log('WebSocket 已连接', 'ok');
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'register_start') log(`开始注册 ${msg.count} 个账号…`);
+    else if (msg.type === 'register_done') {
+      log(`注册完成: ${msg.ok}/${msg.total}`, msg.ok === msg.total ? 'ok' : 'warn');
+      document.getElementById('reg-status').textContent = `${msg.ok}/${msg.total}`;
+      reload();
+    } else if (msg.type === 'register_result') {
+      log(`${msg.success ? '✓' : '✗'} ${msg.email || '?'} ${msg.error || ''}`,
+          msg.success ? 'ok' : 'err');
+    } else if (msg.type === 'switch') {
+      log(`switch result: ${JSON.stringify(msg.result)}`);
+    }
+  };
+  ws.onclose = () => { log('WebSocket 已断开，5s 后重连', 'warn'); setTimeout(connectWS, 5000); };
+  ws.onerror = () => log('WebSocket 错误', 'err');
+}
+
+reload();
+connectWS();
+</script>
+</body>
+</html>

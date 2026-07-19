@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific data (NEVER commit credentials)
+accounts.db
+accounts.db-journal
+master.key
+*.dat
+backups/
+logs/
+
+# Local scratch / debugging files
+*.log
+probe_*.log
+_probe_*.log
+tempmail_probe*.py
+tempmail_results.json
+generator_email.html
+get-pip.py
+
+# Reference / temporary copies (not part of the project)
+_ref/
+traeaccount-tmp/
+scripts/
