@@ -171,8 +171,19 @@ def register(
     concurrency: int = typer.Option(2, "-c", "--concurrency", min=1, max=10),
     headed: bool = typer.Option(False, "--headed", help="show the browser"),
     no_persist: bool = typer.Option(False, "--no-persist", help="do not save to DB"),
+    proxy: str = typer.Option(
+        "",
+        "--proxy",
+        help="Override proxy URL for this run (e.g. http://127.0.0.1:7890, "
+             "socks5://127.0.0.1:1080, or 'none' to disable). "
+             "Defaults to TAM_PROXY env var or http://127.0.0.1:10808.",
+    ),
 ) -> None:
     """Register one or more new Trae accounts."""
+    import os
+    if proxy:
+        os.environ["TAM_PROXY"] = proxy
+        console.print(f"[dim]using proxy: {proxy}[/dim]")
     from .register import register_batch
     results = asyncio.run(
         register_batch(
@@ -181,6 +192,18 @@ def register(
     )
     ok = sum(1 for r in results if r.success)
     console.print(f"[green]{ok}/{len(results)}[/green] registered")
+    # If everything failed with connection errors, print a helpful hint.
+    if ok == 0 and results:
+        errs = [r.error or "" for r in results]
+        if any("connect" in e.lower() or "proxy" in e.lower() for e in errs):
+            from .config import get_proxy
+            console.print(
+                f"[yellow]hint:[/yellow] all attempts failed with connection errors.\n"
+                f"  current proxy: [bold]{get_proxy() or '(none)'}[/bold]\n"
+                f"  verify the proxy port is correct (Clash=7890, v2rayN=10809, etc.)\n"
+                f"  override with: tam register 1 --proxy http://127.0.0.1:7890\n"
+                f"  or disable:     tam register 1 --proxy none"
+            )
     for r in results:
         if r.success:
             console.print(f"  [green]✓[/green] {r.email}")
@@ -263,7 +286,7 @@ def show_path() -> None:
 @app.command()
 def info() -> None:
     """Show environment / configuration info."""
-    from .config import get_license_dat_path, get_trae_config_dir
+    from .config import get_license_dat_path, get_proxy, get_trae_config_dir
     from .profile import get_profile_root
     console.print(f"tam version      : {__version__}")
     console.print(f"Trae data dir   : {get_trae_data_dir()}")
@@ -271,6 +294,7 @@ def info() -> None:
     console.print(f"license.dat     : {get_license_dat_path()}")
     console.print(f"Trae exe        : {get_trae_exe_path() or '(not configured)'}")
     console.print(f"profile root    : {get_profile_root()}")
+    console.print(f"proxy           : {get_proxy() or '(direct, no proxy)'}")
     console.print(f"db path         : {db.get_db_path() if hasattr(db, 'get_db_path') else '(internal)'}")
 
 
