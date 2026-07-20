@@ -56,7 +56,6 @@ class MailPool:
 def default_pool() -> MailPool:
     from .emailnator import EmailNatorProvider
     from .tempmailplus import TempMailPlusProvider
-    from .deepmails import DeepMailsProvider
     from .mailtm import MailTmProvider
     from .tempmail import TempMailLolProvider
 
@@ -65,10 +64,26 @@ def default_pool() -> MailPool:
     # blocklist — verified 2026-07-18 (Trae Login returns FirstLogin=true).
     # All other providers' domains are blocked at Trae Login (error_code
     # 20116) but kept here as OTP-receiving fallbacks for diagnostics.
-    return MailPool([
+    providers: list[EmailProvider] = [
         EmailNatorProvider(),
         TempMailPlusProvider(),
-        DeepMailsProvider(),
         MailTmProvider(),
         TempMailLolProvider(),
-    ])
+    ]
+
+    # DeepMails requires the optional 'browser' extra (Playwright). Only
+    # include it if playwright is actually installed — otherwise skip
+    # silently so the default emailnator flow keeps working.
+    try:
+        from .deepmails import HAS_PLAYWRIGHT, DeepMailsProvider
+        if HAS_PLAYWRIGHT:
+            providers.insert(2, DeepMailsProvider())
+        else:
+            log.info(
+                "playwright not installed — skipping DeepMails provider. "
+                "Install with `pip install -e .[browser]` to enable it."
+            )
+    except ImportError as e:  # noqa: BLE001
+        log.debug("DeepMails provider not available: %s", e)
+
+    return MailPool(providers)

@@ -24,16 +24,39 @@ import logging
 import re
 from typing import Any
 
-from playwright.async_api import (
-    Browser,
-    BrowserContext,
-    Error as PlaywrightError,
-    Page,
-    Request,
-    Response,
-    TimeoutError as PlaywrightTimeout,
-    async_playwright,
-)
+# Playwright is an OPTIONAL dependency — only required for this one
+# provider (DeepMails). The default emailnator flow does not need it.
+# We try the import at module level so `except PlaywrightError` clauses
+# inside methods work; if playwright is not installed, we substitute
+# placeholder classes so the module still loads. Calling start() without
+# playwright installed raises a clear, actionable error.
+try:
+    from playwright.async_api import (
+        Browser,
+        BrowserContext,
+        Error as PlaywrightError,
+        Page,
+        Request,
+        Response,
+        TimeoutError as PlaywrightTimeout,
+        async_playwright,
+    )
+    HAS_PLAYWRIGHT = True
+except ImportError:  # pragma: no cover - exercised only without playwright
+    HAS_PLAYWRIGHT = False
+
+    class PlaywrightError(Exception):
+        """Placeholder when playwright is not installed."""
+
+    class PlaywrightTimeout(Exception):
+        """Placeholder when playwright is not installed."""
+
+    # Type annotations are strings (from __future__ import annotations),
+    # so these never get evaluated at runtime. Set to None to make any
+    # accidental runtime use obvious.
+    Browser = BrowserContext = Page = Request = Response = None
+    async_playwright = None  # type: ignore[assignment]
+
 
 from ..config import get_proxy
 from .base import Inbox, ProviderError, extract_otp
@@ -48,6 +71,20 @@ _BLOCKED_DOMAINS = {"deepmails.org"}
 _MAX_INBOX_ATTEMPTS = 5
 
 
+# Sentinel used to give a clean error message when playwright is missing.
+class PlaywrightNotInstalledError(ProviderError):
+    """Raised when DeepMails provider is used without `pip install -e .[browser]`."""
+
+
+def _check_playwright() -> None:
+    """Raise a helpful error if playwright is not installed."""
+    if not HAS_PLAYWRIGHT:
+        raise PlaywrightNotInstalledError(
+            "DeepMails provider requires the optional 'browser' extra. "
+            "Install with: pip install -e \".[browser]\" && playwright install chromium"
+        )
+
+
 class DeepMailsProvider:
     name = "deepmails"
 
@@ -58,6 +95,7 @@ class DeepMailsProvider:
         self._browser: Browser | None = None
 
     async def start(self) -> None:
+        _check_playwright()
         if self._browser is not None:
             return
         self._pw = await async_playwright().start()

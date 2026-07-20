@@ -14,7 +14,6 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "httpx>=0.27",
-    "playwright>=1.40",
     "sqlmodel>=0.0.16",
     "cryptography>=42",
     "keyring>=24",
@@ -27,6 +26,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Browser-based email providers (e.g. DeepMails for Cloudflare-Turnstile-protected
+# sites). NOT required for the default emailnator flow — install only if you
+# need a fallback browser-rendered email source:
+#   pip install -e ".[browser]" && playwright install chromium
+browser = [
+    "playwright>=1.40",
+]
 test = ["pytest>=8"]
 
 [project.scripts]
