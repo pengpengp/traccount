@@ -50,10 +50,22 @@ def get_app_data_dir() -> Path:
     return p
 
 
+def _is_trae_cn() -> bool:
+    """Check if the configured Trae executable is the CN version."""
+    try:
+        from .process_ctl import get_trae_exe_path
+        exe = get_trae_exe_path()
+        return bool(exe and "trae cn" in exe.lower())
+    except Exception:
+        return False
+
+
 def get_trae_data_dir() -> Path:
     """Trae IDE user-data directory.
 
-    Override with ``TRAE_DATA_DIR`` for testing or non-standard installs.
+    Auto-detects Trae CN (``Trae CN`` subfolder) based on the configured
+    Trae executable path. Override with ``TRAE_DATA_DIR`` for testing
+    or non-standard installs.
     """
     override = os.environ.get("TRAE_DATA_DIR")
     if override:
@@ -63,7 +75,8 @@ def get_trae_data_dir() -> Path:
         appdata = os.environ.get("APPDATA")
         if not appdata:
             raise RuntimeError("APPDATA env var not set")
-        return Path(appdata) / "Trae"
+        suffix = "Trae CN" if _is_trae_cn() else "Trae"
+        return Path(appdata) / suffix
     if is_macos():
         home = os.environ.get("HOME", str(Path.home()))
         return Path(home) / "Library" / "Application Support" / "Trae"
@@ -78,14 +91,21 @@ def get_trae_config_dir() -> Path:
     """Trae IDE config directory (where ``license.dat`` lives).
 
     Separate from :func:`get_trae_data_dir`: Trae stores its license in
-    ``~/.config/TraeAI/`` on all platforms (the Electron ``app.getPath``
-    for ``appData`` is the OS home, not the user-data dir).
+    the Electron ``app.getPath("appData")`` directory (on Windows this
+    is ``%APPDATA%\\Trae`` or ``%APPDATA%\\Trae CN``, NOT the user-data
+    dir under ``%APPDATA%``).
 
-    Override with ``TRAE_CONFIG_DIR`` for non-standard installs.
+    Detects Trae vs Trae CN based on the configured exe path (same logic
+    as ``get_trae_data_dir``). Override with ``TRAE_CONFIG_DIR``.
     """
     override = os.environ.get("TRAE_CONFIG_DIR")
     if override:
         return Path(override)
+    if is_windows():
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            suffix = "Trae CN" if _is_trae_cn() else "Trae"
+            return Path(appdata) / suffix
     home = os.environ.get("HOME") or str(Path.home())
     # On Windows, HOME may be unset; fall back to USERPROFILE.
     if is_windows() and not os.environ.get("HOME"):

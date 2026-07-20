@@ -156,6 +156,10 @@ def patch_storage_telemetry(
     if clear_auth:
         for k in AUTH_KEYS:
             obj.pop(k, None)
+        # Also clear Trae CN's encrypted auth keys (iCubeAuthInfo://icube-dc:*)
+        for k in list(obj):
+            if k.startswith("iCubeAuthInfo://icube-dc:"):
+                obj.pop(k, None)
     obj.update(telemetry_fields(machine_id))
     write_storage(trae_dir, obj)
     return obj

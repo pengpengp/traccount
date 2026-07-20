@@ -103,11 +103,22 @@ class Switcher:
         # 5. clear runtime caches (no longer touches state.vscdb / cookies)
         removed = machine.clear_runtime_cache(trae_dir)
 
-        # 6. patch telemetry + clear old auth keys
-        machine.patch_storage_telemetry(machine_id, trae_dir, clear_auth=True)
+        # 6. patch telemetry
+        #    Current Trae (both CN and international) uses an encrypted
+        #    iCubeAuthInfo://icube-dc:<user_id> format that cannot be
+        #    programmatically generated. When a profile exists for the
+        #    target account, preserve all auth keys (the encrypted blob
+        #    was restored from the profile). Without a profile, clear
+        #    auth so Trae starts logged out.
+        _has_profile = profile.has_profile(account.id)
+        machine.patch_storage_telemetry(machine_id, trae_dir, clear_auth=not _has_profile)
 
         # 7. write new login info (iCubeAuthInfo / iCubeEntitlementInfo)
-        machine.write_login_info(trae_dir, info)
+        #    Only as a best-effort for older Trae versions that read the
+        #    .cloudide JSON format. Current Trae converts this to the
+        #    encrypted icube-dc format on login, so a profile is required.
+        if not _has_profile:
+            machine.write_login_info(trae_dir, info)
 
         # 8. handle license.dat — if the target account's profile has one,
         # it's already been restored by step 3. If not (first switch), we
@@ -178,6 +189,7 @@ class Switcher:
         self.ctl.kill()
         machine.write_machineid(trae_dir, mid)
         machine.clear_runtime_cache(trae_dir)
+        # For Trae CN, clear auth too (this is a reset-to-logged-out operation)
         machine.patch_storage_telemetry(mid, trae_dir, clear_auth=True)
         # Drop license.dat so Trae doesn't auto-restore the previous account.
         lic_path = get_license_dat_path()
@@ -201,12 +213,26 @@ class Switcher:
 
         trae_dir = Path(get_trae_data_dir())
         storage = machine.read_storage(trae_dir)
+
+        # Try international format first, then Trae CN encrypted format.
         raw = storage.get("iCubeAuthInfo://icube.cloudide")
-        if not raw:
-            return None
-        try:
-            auth = json.loads(raw)
-        except json.JSONDecodeError:
+        auth: dict | None = None
+        if raw:
+            try:
+                auth = json.loads(raw)
+            except json.JSONDecodeError:
+                pass
+
+        if auth is None:
+            # Trae CN: find iCubeAuthInfo://icube-dc:<user_id> key (value is
+            # encrypted, but we can get the user_id from the key itself).
+            for k in storage:
+                if k.startswith("iCubeAuthInfo://icube-dc:"):
+                    uid = k.split(":", 2)[-1]
+                    auth = {"userId": uid, "token": ""}
+                    break
+
+        if auth is None:
             return None
         acct_info = auth.get("account", {})
         machine_id = machine.read_machineid(trae_dir) or machine.generate_machine_id()

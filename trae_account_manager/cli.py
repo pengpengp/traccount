@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import pathlib
 import sys
 from typing import Optional
 
@@ -370,7 +371,7 @@ def profile_backup(
         raise typer.Exit(1)
     sw = Switcher()
     sw.ctl.kill()  # ensure Trae is not running
-    res = backup_profile(Path(get_trae_data_dir()), a.id, email=a.email)
+    res = backup_profile(pathlib.Path(get_trae_data_dir()), a.id, email=a.email)
     console.print(
         f"[green]backed up[/green] {len(res['copied_files'])} files + "
         f"{len(res['copied_dirs'])} dirs → profile/{a.id[:8]}"

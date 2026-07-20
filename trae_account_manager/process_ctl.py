@@ -39,8 +39,10 @@ def get_trae_exe_path() -> str | None:
         local = os.environ.get("LOCALAPPDATA", "")
         for c in (
             rf"{local}\Programs\Trae\Trae.exe",
+            rf"{local}\Programs\Trae CN\Trae CN.exe",
             rf"{local}\Trae\Trae.exe",
             r"C:\Program Files\Trae\Trae.exe",
+            r"C:\Program Files\Trae CN\Trae CN.exe",
         ):
             candidates.append(c)
     elif sys.platform == "darwin":
@@ -65,6 +67,11 @@ class ProcessController(Protocol):
 class DefaultProcessController:
     """Real process controller (Windows/macOS). Linux = no-op for tests."""
 
+    @staticmethod
+    def _trae_image_names() -> list[str]:
+        """Return the Trae process image names to look for (Trae CN uses "Trae CN.exe")."""
+        return ["Trae.exe", "Trae CN.exe"]
+
     def is_running(self) -> bool:
         if sys.platform.startswith("win"):
             try:
@@ -72,7 +79,14 @@ class DefaultProcessController:
                     ["tasklist", "/FI", "IMAGENAME eq Trae.exe", "/NH"],
                     capture_output=True, text=True, timeout=10,
                 )
-                return "Trae.exe" in out.stdout
+                if "Trae.exe" in out.stdout:
+                    return True
+                # Also check for Trae CN.exe
+                out2 = subprocess.run(
+                    ["tasklist", "/FI", "IMAGENAME eq Trae CN.exe", "/NH"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                return "Trae CN.exe" in out2.stdout
             except Exception:
                 return False
         if sys.platform == "darwin":
@@ -88,10 +102,12 @@ class DefaultProcessController:
 
     def kill(self) -> None:
         if sys.platform.startswith("win"):
-            subprocess.run(["taskkill", "/IM", "Trae.exe"], capture_output=True)
+            for img in self._trae_image_names():
+                subprocess.run(["taskkill", "/IM", img], capture_output=True)
             time.sleep(0.5)
             if self.is_running():
-                subprocess.run(["taskkill", "/F", "/IM", "Trae.exe"], capture_output=True)
+                for img in self._trae_image_names():
+                    subprocess.run(["taskkill", "/F", "/IM", img], capture_output=True)
             time.sleep(1.0)
             return
         if sys.platform == "darwin":
@@ -116,7 +132,7 @@ class DefaultProcessController:
         if sys.platform == "darwin":
             subprocess.Popen(["open", "-a", exe])
         else:
-            subprocess.Popen([exe])
+            subprocess.Popen([exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class DryRunProcessController:
