@@ -20,6 +20,15 @@ from .machine import TraeLoginInfo, login_info_from_dict
 from .process_ctl import DefaultProcessController, ProcessController
 from .vault import decrypt_obj, encrypt_obj
 
+# Lazy import for TraeApiClient (avoids circular import at module level)
+_api_client = None
+def _get_api_client():
+    global _api_client
+    if _api_client is None:
+        from .trae_api import TraeApiClient as C
+        _api_client = C
+    return _api_client
+
 log = logging.getLogger(__name__)
 
 
@@ -153,7 +162,18 @@ class Switcher:
         db.upsert_account(account)
         db.set_current_account(account.id)
 
-        # 11. launch Trae
+        # 11. For first-time switch (no profile), refresh JWT via API using
+        #     stored cookies, write fresh credentials, and create profile.
+        #     This avoids requiring manual login on first switch.
+        if not _has_profile:
+            _profile_created = self._refresh_auth_and_create_profile(
+                account, info, trae_dir, machine_id,
+            )
+            if _profile_created:
+                _has_profile = True
+                log.info("auto-created profile for %s via API auth", account.email)
+
+        # 12. launch Trae
         launched = False
         if launch:
             try:
@@ -176,6 +196,113 @@ class Switcher:
             "restore_count": len(restore_result.get("restored_files", []))
                               + len(restore_result.get("restored_dirs", [])),
         }
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _refresh_auth_and_create_profile(
+        account, info: TraeLoginInfo, trae_dir: Path, machine_id: str,
+    ) -> bool:
+        """Use stored cookies to refresh JWT via API, update storage.json, create profile.
+
+        Returns True if successful (Trae should start logged-in), False otherwise.
+        On failure, the existing fallback (old-format auth) remains in storage.json,
+        and Trae will start logged-out — user can manually log in once.
+        """
+        try:
+            import asyncio
+            secrets = decrypt_obj(account.secrets_blob)
+            cookies = secrets.get("cookies") or secrets.get("cookies_list") or []
+            if not cookies:
+                log.warning("no cookies in secrets_blob for %s", account.email)
+                return False
+
+            jwt_token = secrets.get("jwt_token", "")
+
+            async def _do_refresh() -> tuple | None:
+                Cls = _get_api_client()
+                async with Cls(
+                    cookies=cookies,
+                    jwt_token=jwt_token,
+                    region=account.region,
+                ) as client:
+                    # Step 1: call Trae Login to obtain X-Cloudide-Session cookie
+                    try:
+                        await client.trae_login()
+                    except Exception as e:
+                        log.debug("trae_login failed: %s", e)
+                        return None
+                    # Step 2: exchange session for a fresh JWT
+                    try:
+                        await client.get_user_token()
+                    except Exception as e:
+                        log.debug("get_user_token failed: %s", e)
+                        return None
+                    delta = client.get_refreshed_secrets_delta()
+                    if not delta:
+                        return None
+                    return client, delta
+
+            result = asyncio.run(_do_refresh())
+            if result is None:
+                log.warning("API auth refresh returned no delta for %s", account.email)
+                return False
+
+            refreshed_client, delta = result
+
+            # Build fresh login info from delta
+            fresh_token = delta.get("jwt_token", info.token)
+            fresh_refresh = delta.get("refresh_token", info.refresh_token)
+            delta_login_info = delta.get("login_info", {})
+            fresh_info = TraeLoginInfo(
+                token=fresh_token,
+                refresh_token=fresh_refresh,
+                user_id=delta_login_info.get("user_id", info.user_id),
+                email=delta_login_info.get("email", info.email),
+                username=delta_login_info.get("username", info.username),
+                avatar_url=delta_login_info.get("avatar_url", info.avatar_url),
+                host=delta_login_info.get("host", info.host),
+                region=delta_login_info.get("region", info.region),
+            )
+
+            # Update account secrets_blob with fresh credentials
+            secrets.update(delta)
+            # Rebuild login_info in secrets to match
+            secrets["login_info"] = {
+                "token": fresh_token,
+                "refresh_token": fresh_refresh,
+                "user_id": fresh_info.user_id,
+                "email": fresh_info.email,
+                "username": fresh_info.username,
+                "avatar_url": fresh_info.avatar_url,
+                "host": fresh_info.host,
+                "region": fresh_info.region,
+            }
+            account.secrets_blob = encrypt_obj(secrets)
+            db.upsert_account(account)
+
+            # Write fresh auth info to storage.json (overwrite the old-format
+            # write that was done in step 7). Trae reads iCubeAuthInfo://icube.cloudide
+            # on startup — with a non-expired JWT it will authenticate successfully
+            # and then generate the encrypted icube-dc format on first contact.
+            obj = machine.read_storage(trae_dir)
+            obj["iCubeAuthInfo://icube.cloudide"] = json.dumps(
+                machine.build_auth_info(fresh_info), ensure_ascii=False
+            )
+            obj["iCubeEntitlementInfo://icube.cloudide"] = json.dumps(
+                machine.build_entitlement_info(), ensure_ascii=False
+            )
+            machine.write_storage(trae_dir, obj)
+
+            # Create profile for this account (captures cookies, storage.json,
+            # chat history, workspace state — everything needed for future switches)
+            profile.backup_profile(trae_dir, account.id, email=account.email)
+
+            log.info("API auth refresh + profile created for %s", account.email)
+            return True
+
+        except Exception as e:
+            log.warning("API auth refresh failed for %s: %s", account.email, e)
+            return False
 
     # ------------------------------------------------------------------
     def clear_login_state(self) -> dict:
